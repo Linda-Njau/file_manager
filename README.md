@@ -13,7 +13,7 @@ The objective is to build a simple platform to upload and view files:
 
 
 The codebase will explore the following concepts:
-- how to create an API with Express
+- how to create an API with Expressa
 - how to authenticate a user
 - how to store data in MongoDB
 - how to store temporary data in Redis
