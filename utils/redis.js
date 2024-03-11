@@ -8,6 +8,7 @@ class RedisClient {
     this.client.on('error', (error) => {
       console.log(`Redis connection error: ${error}`);
     });
+    this.connect();
   }
 
   async connect() {
@@ -32,5 +33,4 @@ class RedisClient {
 }
 
 const redisClient = new RedisClient();
-redisClient.connect().catch(console.error);
 module.exports = redisClient;

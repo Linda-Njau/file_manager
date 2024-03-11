@@ -12,15 +12,10 @@ class DBClient {
         this.db = this.client.db(database);
     }
 
-    async isAlive() {
-      try {
-        await this.client.connect();
-        return true;
-      } catch (e) {
-        console.error('Error connecting to MongoDB: ', e);
-        return false;
-      }
+    isAlive() {
+      return Boolean(this.db);
     }
+  
 
     async nbUsers() {
         const usersCollection = this.db.collection('users');
