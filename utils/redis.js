@@ -3,8 +3,6 @@ import { createClient } from 'redis';
 class RedisClient {
   constructor() {
     this.client = createClient();
-    console.log(this.client);
-    // Handle Redis connection error
     this.client.on('error', (error) => {
       console.log(`Redis connection error: ${error}`);
     });
