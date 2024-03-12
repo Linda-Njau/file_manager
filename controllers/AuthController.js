@@ -36,4 +36,18 @@ export default class AuthController {
         return res.send({ token });
 
     }
+
+    static async getDisconnect(req, res) {
+        const xToken  = req.header('X-Token');
+
+        const userId = await redisClient.get(`auth_${xToken}`);
+
+        if (!userId) {
+            res.statusCode = 401;
+            return res.send({error: 'Unauthorized'});
+        }
+        await redisClient.del(`auth_${xToken}`);
+        res.statusCode = 204;
+        return res.send();
+    }
 }
