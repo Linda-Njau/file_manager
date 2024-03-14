@@ -120,4 +120,83 @@ export default class FilesController {
     }
     return res.send();
   }
+  static async getShow (req, res) {
+    const xToken = req.header('X-Token');
+    if (!xToken) {
+        res.statusCode = 404;
+        return res.send({ error: 'Unauthorized' });        
+    }
+    const userId = await redisClient.get(`auth_${xToken}`)
+    console.log(`This is the userId: ${userId}`)
+    if (!userId) {
+        res.statusCode = 404;
+        return res.send({ error: 'Unauthorized' });
+    }
+    const fileId = req.params.id;
+    if (!ObjectId.isValid(fileId)) {
+        res.statusCode = 404;
+        return res.send({ error: 'Not Found' });
+    }
+    console.log(`FileId:  ${fileId}`)
+    const userCol = dbClient.db.collection('users');
+    const user = await userCol.findOne({_id: new ObjectId(userId)});
+    if (!user) {
+        res.statusCode = 401;
+        return res.send({ error: 'Unauthorized' });
+    }
+    console.log(`User: ${user}`)
+    const filesColl = dbClient.db.collection('files');
+    const file = await filesColl.findOne({_id: new ObjectId(fileId), userId })
+    if (!file) {
+        res.statusCode = 404;
+        return res.send({ error: 'Not Found' });
+    }
+    console.log(`File ${file}`)
+
+    res.statusCode = 200;
+    return res.json(file)
 }
+static async getIndex(req, res) {
+    const xToken = req.header('X-Token');
+    if (!xToken) {
+        res.statusCode = 401;
+        return res.send({error: 'Unauthorized'});
+    }
+    const userId = await redisClient.get(`auth_${xToken}`);
+    console.log(`User id: ${userId}`)
+    if (!userId) {
+        res.statusCode = 401;
+        return res.send({error: 'Unauthorized'});
+    }
+    const parentId = req.query.parentId || 0;
+    const page = parseInt(req.query.page) || 0;
+    const perPage = 20;
+    const skip = page * perPage;
+
+    const userCol = dbClient.db.collection('users');
+    const user = await userCol.findOne({_id: new ObjectId(userId)});
+    if (!user) {
+        res.statusCode = 401;
+        return res.send({error: 'Unauthorized'});
+    }
+    console.log(`User ${user}`)
+    const filesColl = dbClient.db.collection('files');
+    let query = { userId };
+
+    if (parentId !== '0') {
+        query.parentId = parentId;
+    }
+
+    const files = await filesColl
+        .find(query)
+        .limit(perPage)
+        .skip(skip)
+        .toArray();
+
+    console.log(`files: ${files}`)
+    res.statusCode = 200
+    return res.json(files);
+}
+}
+
+  
