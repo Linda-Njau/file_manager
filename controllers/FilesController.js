@@ -1,5 +1,6 @@
 import env from 'process';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
 import { promises as fsPromise } from 'fs';
 import fs from 'fs';
 import mimeTypes from 'mime-types';
@@ -10,117 +11,98 @@ import dbClient from '../utils/db';
 export default class FilesController {
   static async postUpload(req, res) {
     const xToken = req.header('X-Token');
+    if (!xToken) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
 
     const userId = await redisClient.get(`auth_${xToken}`);
     if (!userId) {
-      res.statusCode = 401;
-      return res.send({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
+
     const usersCol = dbClient.db.collection('users');
     const user = await usersCol.findOne({ _id: new ObjectId(userId) });
-
     if (!user) {
-      res.statusCode = 401;
-      return res.send({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
-    const fileTypes = ['folder', 'file', 'image'];
-
-    const {
-      name, type, parentId = null, isPublic = false, data = '',
-    } = req.body;
+    const { name, type, parentId = 0, isPublic = false, data } = req.body;
 
     if (!name) {
-      res.statusCode = 400;
-      return res.send({ error: 'Missing name' });
+      res.status(400).json({ error: 'Missing name' });
+      return;
     }
 
-    if (!type || !fileTypes.includes(type)) {
-      res.statusCode = 400;
-      return res.send({ error: 'Missing type' });
+    const acceptedTypes = ['folder', 'file', 'image'];
+    if (!type || !acceptedTypes.includes(type)) {
+      res.status(400).json({ error: 'Missing or invalid type' });
+      return;
     }
 
-    if (!data && type !== 'folder') {
-      res.statusCode = 400;
-      return res.send({ error: 'Missing data' });
+    if (type !== 'folder' && !data) {
+      res.status(400).json({ error: 'Missing data' });
+      return;
     }
 
     const filesColl = dbClient.db.collection('files');
 
-    if (parentId !== null) {
-      const file = await filesColl.findOne({ _id: new ObjectId(parentId) });
-      if (!file) {
-        res.statusCode = 400;
-        return res.send({ error: 'Parent not found' });
+    // Check if parentId is provided and valid
+    if (parentId !== 0) {
+      const parentFile = await filesColl.findOne({ _id: new ObjectId(parentId) });
+      if (!parentFile) {
+        res.status(400).json({ error: 'Parent not found' });
+        return;
       }
-      if (file.type !== 'folder') {
-        res.statusCode = 400;
-        return res.send({ error: 'Parent is not a folder' });
+      if (parentFile.type !== 'folder') {
+        res.status(400).json({ error: 'Parent is not a folder' });
+        return;
       }
-      if (file.type === 'folder') {
-        const folderPath = file.localpath;
-        const filePath = `${folderPath}/${name}`;
-        const dataDecoded = Buffer.from(data, 'base64');
-        await fsPromise.mkdir(folderPath, { recursive: true });
-        if (type !== 'folder') {
-          await fsPromise.writeFile(filePath, dataDecoded);
-        } else {
-          await fsPromise.mkdir(filePath);
-        }
-
-        const newFile = await filesColl.insertOne({
-          userId,
-          name,
-          type,
-          isPublic,
-          parentId,
-          localpath: filePath,
-        });
-
-        res.statusCode = 201;
-        return res.send({
-          id: newFile.insertedId,
-          userId,
-          name,
-          type,
-          isPublic,
-          parentId,
-        });
-      }
-    } else {
-      const folderPath = env.FOLDER_PATH || '/tmp/files_manager';
-      const fileName = uuidv4();
-      const filePath = `${folderPath}/${fileName}`;
-      const dataDecoded = Buffer.from(data, 'base64');
-
-      await fsPromise.mkdir(folderPath, { recursive: true });
-      if (type !== 'folder') {
-        await fsPromise.writeFile(filePath, dataDecoded);
-      } else {
-        await fsPromise.mkdir(filePath);
-      }
-
-      const newFile = await filesColl.insertOne({
-        userId,
-        name,
-        type,
-        isPublic,
-        parentId: 0,
-        localpath: filePath,
-      });
-
-      res.statusCode = 201;
-
-      return res.send({
-        id: newFile.insertedId,
-        userId,
-        name,
-        type,
-        isPublic,
-        parentId: 0,
-      });
     }
-    return res.send();
+
+    let localPath = '';
+    if (type !== 'folder') {
+      const folderPath = process.env.FOLDER_PATH || '/tmp/files_manager';
+      const fileName = uuidv4();
+      localPath = path.join(folderPath, fileName);
+
+      try {
+        await fs.promises.mkdir(folderPath, { recursive: true });
+      
+        const fileData = Buffer.from(data, 'base64');
+        await fs.promises.writeFile(localPath, fileData);
+      } catch (error) {
+        console.error('Error writing file to disk:', error);
+        res.status(500).json({ error: 'Failed to store file on disk' });
+        return;
+      }
+    }
+
+    const newFile = {
+      userId: new ObjectId(userId),
+      name,
+      type,
+      isPublic,
+      parentId: new ObjectId(parentId),
+      localPath: type !== 'folder' ? localPath : null,
+    };
+
+    try {
+      const result = await filesColl.insertOne(newFile);
+      console.log(`This is the result ${result}`);
+      if (!result || !result.ops || result.ops.length === 0) {
+        throw new Error('Failed to insert document into database');
+      }
+    
+      const insertedFile = result.ops[0];
+      console.log('File inserted successfully:', insertedFile);
+      res.status(201).json(insertedFile);
+    } catch (error) {
+      console.error('Error saving file to database:', error);
+      res.status(500).json({ error: 'Failed to save file in database' });
+    }
   }
   static async getShow (req, res) {
     const xToken = req.header('X-Token');
@@ -270,6 +252,7 @@ static async putUnpublish(req, res) {;
 }
 
 static async getFile(req, res) {
+  const size = req.query.size || null
   const xToken = req.header('X-Token');
   if (!xToken){
     res.statusCode = 401
@@ -285,14 +268,9 @@ static async getFile(req, res) {
     res.statusCode = 404
     return res.send({error: 'Not found fileId'});
   }
-  const userCol = dbClient.db.collection('users');
-  const user = await userCol.findOne({_id: new ObjectId(userId)});
-  if (!user) {
-    res.statusCode = 401
-    return res.send({error: 'Unauthorized'});
-  }
   const filesColl = dbClient.db.collection('files');
   const file = await filesColl.findOne({ _id: new ObjectId(fileId)});
+  console.log(`The file${file}`)
 
   if (!file) {
     res.statusCode = 404
@@ -308,11 +286,14 @@ static async getFile(req, res) {
     res.statusCode = 400
     return res.send({ error: 'A folder doesn\'t have content' })
   }
-  const filePath = file.localpath;
+  let filePath = file.localpath;
+  console.log(`This is the filepath ${filePath}`)
+
   if (!fs.existsSync(filePath)) {
     res.statuscode = 404
     return res.send({error: 'Not found filepath'});
   }
+
   const fileContent = fs.readFileSync(filePath);
   const mimeType = mimeTypes.lookup(filePath);
   
